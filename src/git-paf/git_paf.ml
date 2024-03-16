@@ -109,16 +109,16 @@ let response_handler mvar pusher resp body =
   let rec on_read buf ~off ~len =
     let str = Bigstringaf.substring buf ~off ~len in
     pusher (Some str);
-    Httpaf.Body.schedule_read ~on_eof ~on_read body
+    Httpaf.Body.Reader.schedule_read ~on_eof ~on_read body
   in
-  Httpaf.Body.schedule_read ~on_eof ~on_read body;
+  Httpaf.Body.Reader.schedule_read ~on_eof ~on_read body;
   Lwt.async @@ fun () -> Lwt_mvar.put mvar resp
 
 let transmit body = function
-  | None -> Httpaf.Body.close_writer body
+  | None -> Httpaf.Body.Writer.close body
   | Some str ->
-      Httpaf.Body.write_string body str;
-      Httpaf.Body.close_writer body
+      Httpaf.Body.Writer.write_string body str;
+      Httpaf.Body.Writer.close body
 
 exception Invalid_response_body_length of Httpaf.Response.t
 exception Malformed_response of string
@@ -142,11 +142,12 @@ let call ?(ctx = Mimic.empty) ?(headers = Httpaf.Headers.empty) ?body ?chunked
   | Ok flow -> (
       let error_handler = error_handler mvar_err in
       let response_handler = response_handler mvar_res pusher in
-      let httpaf_body, conn =
-        Httpaf.Client_connection.request ~error_handler ~response_handler req
+      let conn = Httpaf.Client_connection.create () in
+      let writer =
+        Httpaf.Client_connection.request conn ~error_handler ~response_handler req
       in
       Lwt.async (fun () -> Paf.run (module Httpaf_Client_connection) conn flow);
-      transmit httpaf_body body;
+      transmit writer body;
       Lwt.pick
         [
           (Lwt_mvar.take mvar_res >|= fun res -> `Response res);
